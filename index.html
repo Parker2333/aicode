@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Solar System</title>
+  <style>
+    html, body { margin:0; height:100%; overflow:hidden; background:black; }
+    #info { position:absolute; top:10px; left:10px; padding:8px; background:rgba(0,0,0,0.6); color:#fff; font-family:sans-serif; display:none; }
+    #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-family:sans-serif; color:white; }
+    #progress { width:300px; height:10px; background:#222; margin-top:6px; }
+    #bar { width:0; height:100%; background:#0f0; }
+  </style>
+</head>
+<body>
+<div id="loading">Loading<div id="progress"><div id="bar"></div></div></div>
+<div id="info"></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17/dist/lil-gui.umd.min.js"></script>
+<script>
+const container = document.body;
+let scene, camera, renderer, controls;
+let planets = [];
+let orbits = [];
+let speedScale = 1;
+const info = document.getElementById('info');
+
+init();
+animate();
+
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+
+  const manager = new THREE.LoadingManager();
+  const loading = document.getElementById('loading');
+  const bar = document.getElementById('bar');
+  manager.onProgress = function(url, loaded, total) {
+    bar.style.width = (loaded/total*100)+"%";
+  };
+  manager.onLoad = function() {
+    loading.style.display = 'none';
+  };
+  const textureLoader = new THREE.TextureLoader(manager);
+
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 50, 150);
+
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  container.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+  const ambient = new THREE.AmbientLight(0x333333);
+  scene.add(ambient);
+
+  const sunTexture = textureLoader.load('https://threejs.org/examples/textures/planets/sun.jpg');
+  const sunMaterial = new THREE.MeshBasicMaterial({ map:sunTexture });
+  const sun = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), sunMaterial);
+  scene.add(sun);
+
+  const light = new THREE.PointLight(0xffffff, 2, 0);
+  scene.add(light);
+
+  const haloMap = textureLoader.load('https://threejs.org/examples/textures/lensflare/lensflare0.png');
+  const haloMaterial = new THREE.SpriteMaterial({ map: haloMap, blending: THREE.AdditiveBlending });
+  const halo = new THREE.Sprite(haloMaterial);
+  halo.scale.set(20,20,1);
+  sun.add(halo);
+
+  const stars = textureLoader.load('https://threejs.org/examples/textures/galaxy_starfield.png');
+  const starGeometry = new THREE.SphereGeometry(500, 64, 64);
+  const starMaterial = new THREE.MeshBasicMaterial({ map:stars, side:THREE.BackSide });
+  const starMesh = new THREE.Mesh(starGeometry, starMaterial);
+  scene.add(starMesh);
+
+  const planetData = [
+    { name:'Mercury', size:0.5, dist:8, texture:'https://threejs.org/examples/textures/planets/mercury.jpg', rot:58.6, rev:88 },
+    { name:'Venus', size:1.2, dist:11, texture:'https://threejs.org/examples/textures/planets/venus.jpg', rot:-243, rev:224.7 },
+    { name:'Earth', size:1.3, dist:14, texture:'https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg', rot:1, rev:365.2, moon:{ size:0.3, dist:2, texture:'https://threejs.org/examples/textures/planets/moon_1024.jpg', rot:27.3, rev:27.3 } },
+    { name:'Mars', size:0.7, dist:17, texture:'https://threejs.org/examples/textures/planets/mars_1k_color.jpg', rot:1.03, rev:687 },
+    { name:'Jupiter', size:3, dist:24, texture:'https://threejs.org/examples/textures/planets/jupiter.jpg', rot:0.41, rev:4331 },
+    { name:'Saturn', size:2.7, dist:30, texture:'https://threejs.org/examples/textures/planets/saturn.jpg', rot:0.45, rev:10747, ring:{ inner:3.2, outer:4.5, texture:'https://threejs.org/examples/textures/planets/saturnringcolor.jpg' } },
+    { name:'Uranus', size:1.9, dist:38, texture:'https://threejs.org/examples/textures/planets/uranus.jpg', rot:-0.72, rev:30589 },
+    { name:'Neptune', size:1.8, dist:44, texture:'https://threejs.org/examples/textures/planets/neptune.jpg', rot:0.67, rev:59800 }
+  ];
+
+  planetData.forEach(data => {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(data.size, 32, 32), new THREE.MeshPhongMaterial({ map: textureLoader.load(data.texture) }));
+    mesh.position.x = data.dist;
+    scene.add(mesh);
+    data.mesh = mesh;
+    planets.push(data);
+
+    const curve = new THREE.EllipseCurve(0,0,data.dist,data.dist,0,2*Math.PI,false,0);
+    const points = curve.getPoints(64);
+    const orbitGeo = new THREE.BufferGeometry().setFromPoints(points);
+    const orbitLine = new THREE.Line(orbitGeo, new THREE.LineBasicMaterial({ color:0x444444 }));
+    orbitLine.rotation.x = Math.PI/2;
+    scene.add(orbitLine);
+    orbits.push(orbitLine);
+
+    if(data.moon) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(data.moon.size, 16, 16), new THREE.MeshPhongMaterial({ map: textureLoader.load(data.moon.texture) }));
+      mesh.add(m);
+      data.moon.mesh = m;
+    }
+
+    if(data.ring) {
+      const ringGeo = new THREE.RingGeometry(data.ring.inner, data.ring.outer, 64);
+      const tex = textureLoader.load(data.ring.texture);
+      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ map:tex, side:THREE.DoubleSide, transparent:true }));
+      ring.rotation.x = Math.PI/2;
+      mesh.add(ring);
+    }
+  });
+
+  window.addEventListener('resize', onWindowResize);
+  renderer.domElement.addEventListener('click', onClick);
+
+  const gui = new lil.GUI();
+  gui.add({ speed:1 }, 'speed', 0.1, 10, 0.1).name('Time Scale').onChange(v=>speedScale=v);
+  gui.add({ showOrbit:true }, 'showOrbit').name('Show Orbits').onChange(v=>{
+    orbits.forEach(o=>o.visible=v);
+  });
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onClick(event) {
+  const mouse = new THREE.Vector2(
+    (event.clientX/window.innerWidth)*2 - 1,
+    -(event.clientY/window.innerHeight)*2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(planets.map(p=>p.mesh));
+  if(intersects.length>0) {
+    const mesh = intersects[0].object;
+    const data = planets.find(p=>p.mesh===mesh);
+    if(data) {
+      info.style.display='block';
+      info.innerHTML=`<b>${data.name}</b><br/>Rotation: ${data.rot} days<br/>Revolution: ${data.rev} days`;
+    }
+  } else {
+    info.style.display='none';
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  planets.forEach(p => {
+    p.mesh.rotation.y += 0.02 / p.rot * speedScale;
+    const theta = Date.now() * 0.0001 * speedScale / p.rev;
+    p.mesh.position.x = Math.cos(theta) * p.dist;
+    p.mesh.position.z = Math.sin(theta) * p.dist;
+    if(p.moon) {
+      p.moon.mesh.rotation.y += 0.02 / p.moon.rot * speedScale;
+      const moonTheta = Date.now() * 0.0005 * speedScale / p.moon.rev;
+      p.moon.mesh.position.set(Math.cos(moonTheta)*p.moon.dist,0,Math.sin(moonTheta)*p.moon.dist);
+    }
+  });
+  controls.update();
+  renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
